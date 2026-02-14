@@ -17,7 +17,19 @@
         <p class="sheet-peek-hint">Click to see more</p>
       </div>
       <div class="sheet-content">
-        <h1 class="sheet-title">Motion Planning</h1>
+        <p class="sheet-description">A sandbox for experimenting with motion planning algorithms and visualizing pathfinding in real time. Adjust the obstacles and watch the agent navigate.</p>
+        <div class="sheet-control">
+          <label class="sheet-label" for="barrelSlider">
+            Number of Barrels: <span id="barrelCount">60</span>
+          </label>
+          <input type="range" id="barrelSlider" class="sheet-slider" min="0" max="60" value="60" step="1" />
+        </div>
+        <div class="sheet-control">
+          <label class="sheet-label" for="agentSlider">
+            Number of Agents: <span id="agentCount">1</span>
+          </label>
+          <input type="range" id="agentSlider" class="sheet-slider" min="1" max="10" value="1" step="1" />
+        </div>
       </div>
     </div>
 

@@ -4,8 +4,17 @@ import { AnimationMixer, Color, Object3D, Vector2, Vector3 } from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import {FBXLoader} from 'three/examples/jsm/loaders/FBXLoader';
+import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils';
 import Pathing from './PathingBetter';
 import { pointInCircleList } from './collision';
+
+// ── Agent Interface ──
+interface Agent {
+  model: THREE.Object3D;
+  mixer: THREE.AnimationMixer;
+  movements: Vector3[];
+  goal: THREE.Mesh;
+}
 
 // ── Bottom Sheet ──
 const sheet = document.getElementById('sheet')!;
@@ -99,8 +108,6 @@ sheetHandle.addEventListener('click', () => {
 // Tap backdrop to close
 backdrop.addEventListener('click', closeSheet);
 
-let path = new Pathing();
-
 // SCENE
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xADD8E6);
@@ -127,13 +134,17 @@ orbitControls.enablePan = false
 orbitControls.maxPolarAngle = Math.PI / 2 - 0.05
 orbitControls.update();
 
-//MOVEMENT
-let movements: Vector3[] = [];
+// ── Agents ──
+const agents: Agent[] = [];
+let cachedScene: THREE.Object3D | null = null;
+let cachedAnimations: THREE.AnimationClip[] = [];
 let barrelPositions: Vector3[] = [];
 let barrelMesh: THREE.InstancedMesh | null = null;
-let dummy: THREE.Object3D;
-let rotationSet = false;
 const speed = .04;
+
+// Shared goal geometry/material
+const goalGeo = new THREE.CylinderGeometry( 5, 5, 20, 32 );
+const goalMat = new THREE.MeshBasicMaterial( {color: 0x00ff00} );
 
 // Reusable objects for InstancedMesh matrix updates
 const _tempMatrix = new THREE.Matrix4();
@@ -150,21 +161,58 @@ function updateBarrelInstance(index: number, x: number, y: number, z: number, ro
 }
 
 //OBSTACLES
-const numObstacles = 60;
-const goalGeo = new THREE.CylinderGeometry( 5, 5, 20, 32 );
-const goalMat = new THREE.MeshBasicMaterial( {color: 0x00ff00} );
-const goal = new THREE.Mesh( goalGeo, goalMat );
+let numObstacles = 60;
 
-function generateGoal(){
-  const freeSpace = setFreeLocation(0, barrelPositions);
-  goal.position.set(freeSpace.x, 0, freeSpace.z);
-  goal.scale.set(.1, .01, .1);
-  goal.material.transparent = true;
-  goal.material.opacity = .65
-  scene.add( goal );
+// Barrel slider control
+const barrelSlider = document.getElementById('barrelSlider') as HTMLInputElement;
+const barrelCountLabel = document.getElementById('barrelCount')!;
+
+// Prevent slider drag from closing the sheet
+barrelSlider.addEventListener('touchstart', (e) => e.stopPropagation(), { passive: true });
+barrelSlider.addEventListener('mousedown', (e) => e.stopPropagation());
+
+barrelSlider.addEventListener('input', () => {
+  const newCount = parseInt(barrelSlider.value, 10);
+  barrelCountLabel.textContent = String(newCount);
+  numObstacles = newCount;
+  regenerateObstacles();
+});
+
+// Agent slider control
+const agentSlider = document.getElementById('agentSlider') as HTMLInputElement;
+const agentCountLabel = document.getElementById('agentCount')!;
+
+agentSlider.addEventListener('touchstart', (e) => e.stopPropagation(), { passive: true });
+agentSlider.addEventListener('mousedown', (e) => e.stopPropagation());
+
+agentSlider.addEventListener('input', () => {
+  const newCount = parseInt(agentSlider.value, 10);
+  agentCountLabel.textContent = String(newCount);
+  setAgentCount(newCount);
+});
+
+function regenerateObstacles() {
+  barrelPositions = [];
+  if (barrelMesh) {
+    barrelMesh.count = 0;
+    barrelMesh.instanceMatrix.needsUpdate = true;
+  }
+  createObstacles();
+  // Re-path all agents
+  for (const agent of agents) {
+    generateGoalForAgent(agent);
+    const p = new Pathing();
+    agent.movements = p.getPath(agent.model.position, agent.goal.position);
+  }
 }
 
-
+function generateGoalForAgent(agent: Agent) {
+  const freeSpace = setFreeLocation(0, barrelPositions);
+  agent.goal.position.set(freeSpace.x, 0, freeSpace.z);
+  agent.goal.scale.set(.1, .01, .1);
+  agent.goal.material.transparent = true;
+  agent.goal.material.opacity = .65;
+}
 
 function setFreeLocation(numNodes: number, circleCenters: Vector3[]): Vector3{
     let randPos = new Vector3(Math.random() * 16 - 8, 0, Math.random()* 16 - 8);
@@ -185,14 +233,14 @@ axesHelper.position.set(-8, 0 , -8);
 scene.add( axesHelper );
 
 
-function move(agent: Object3D, destination: Vector3, dt: number){
+function move(model: Object3D, agentMovements: Vector3[], destination: Vector3, dt: number){
     if(!destination){
       console.log("No path found, will retry.");
-      movements = [];
+      agentMovements.length = 0;
       return;
     }
 
-    let curPos = new Vector2(agent.position.x, agent.position.z);
+    let curPos = new Vector2(model.position.x, model.position.z);
     let goalPos = new Vector2(destination.x, destination.z)
 
     let dir = new Vector2();
@@ -200,67 +248,107 @@ function move(agent: Object3D, destination: Vector3, dt: number){
 
     let goalRotation = Math.atan2(dir.x, dir.y);
 
-
-
-    if(Math.abs((agent.rotation.y) - goalRotation) < .15){
+    if(Math.abs((model.rotation.y) - goalRotation) < .15){
       //Do nothing
-    } else if(agent.rotation.y < (agent.rotation.y + goalRotation) / 2){
-      agent.rotation.y += .1;
+    } else if(model.rotation.y < (model.rotation.y + goalRotation) / 2){
+      model.rotation.y += .1;
     } else {
-      agent.rotation.y -= .1;
+      model.rotation.y -= .1;
     }
 
     if(dir.length() < .25){
-      movements.shift();
-      rotationSet = false;
+      agentMovements.shift();
       return;
     }
 
     if(!((speed*dt) > dir.length())){
       dir.normalize();
     } else {
-      agent.position.x = destination.x;
-      agent.position.z = destination.z;
+      model.position.x = destination.x;
+      model.position.z = destination.z;
     }
 
     const vel = dir.multiplyScalar(speed);
-    agent.position.add(new Vector3(vel.x, 0, vel.y));
+    model.position.add(new Vector3(vel.x, 0, vel.y));
     return;
 }
 
-let mixer: AnimationMixer;
-//Load Model
-new GLTFLoader().load('scalefix.gltf', function (gltf) {
-    const model = gltf.scene;
-    model.castShadow = true;
-    model.traverse(c=>{
-          c.castShadow = true;
-    });
-    const dummyposx = Math.random()*16 - 8;
-    const dummyposz = Math.random()*16 - 8;
-    model.position.x = dummyposx;
-    model.position.z = dummyposz;
+// ── Agent spawn/remove ──
+function spawnAgent(): Agent | null {
+  if (!cachedScene) return null;
 
-    dummy = model;
+  const cloned = SkeletonUtils.clone(cachedScene);
+  cloned.castShadow = true;
 
-    orbitControls.target = dummy.position;
+  // Randomize hue for this agent — override hue, boost saturation, keep lightness
+  const hueShift = Math.random();
+  cloned.traverse(c => {
+    c.castShadow = true;
+    if (c.isMesh) {
+      c.material = c.material.clone();
+      const hsl = { h: 0, s: 0, l: 0 };
+      c.material.color.getHSL(hsl);
+      c.material.color.setHSL(hueShift, Math.max(hsl.s, 0.8), hsl.l);
+    }
+  });
+
+  const pos = setFreeLocation(0, barrelPositions);
+  cloned.position.set(pos.x, 0, pos.z);
+
+  const mixer = new THREE.AnimationMixer(cloned);
+  cachedAnimations.filter(a => a.name != 'TPose').forEach((a: THREE.AnimationClip) => {
+    mixer.clipAction(a).play();
+  });
+
+  const goalMaterial = goalMat.clone();
+  goalMaterial.color.setHSL(hueShift, 0.8, 0.5);
+  const goal = new THREE.Mesh(goalGeo, goalMaterial);
+  const agent: Agent = { model: cloned, mixer, movements: [], goal };
+
+  generateGoalForAgent(agent);
+  const p = new Pathing();
+  agent.movements = p.getPath(cloned.position, agent.goal.position);
+
+  scene.add(cloned);
+  scene.add(goal);
+  agents.push(agent);
+
+  // Camera follows first agent
+  if (agents.length === 1) {
+    orbitControls.target = cloned.position;
     orbitControls.update();
+  }
 
-    const gltfAnimations: THREE.AnimationClip[] = gltf.animations;
-    mixer = new THREE.AnimationMixer(model);
-    const animationsMap: Map<string, THREE.AnimationAction> = new Map();
-    console.log(animationsMap);
-    gltfAnimations.filter(a => a.name != 'TPose').forEach((a: THREE.AnimationClip) => {
-        animationsMap.set(a.name, mixer.clipAction(a))
-    })
-    let anim = animationsMap.get('animation_0');
-    console.log(anim);
-    anim?.play();
-    scene.add(model);
+  return agent;
+}
 
-    // Start moving immediately
-    const path = new Pathing();
-    movements = path.getPath();
+function removeAgent() {
+  if (agents.length === 0) return;
+  const agent = agents.pop()!;
+  scene.remove(agent.model);
+  scene.remove(agent.goal);
+}
+
+function setAgentCount(n: number) {
+  while (agents.length < n) {
+    spawnAgent();
+  }
+  while (agents.length > n) {
+    removeAgent();
+  }
+}
+
+//Load Model — cache GLTF and spawn first agent
+new GLTFLoader().load('scalefix.gltf', function (gltf) {
+    cachedScene = gltf.scene;
+    cachedAnimations = gltf.animations;
+
+    // Prepare the cached scene
+    cachedScene.castShadow = true;
+    cachedScene.traverse(c => { c.castShadow = true; });
+
+    // Spawn initial agent
+    spawnAgent();
 });
 
 // Load barrel FBX and create InstancedMesh
@@ -364,8 +452,6 @@ function createObstacles(){
     barrelMesh.count = barrelPositions.length;
     barrelMesh.instanceMatrix.needsUpdate = true;
   }
-
-  generateGoal();
 }
 
 
@@ -373,15 +459,6 @@ function createObstacles(){
 //Pathing Helper functions
 export function getBarrelPositions(): Vector3[]{
   return barrelPositions;
-}
-
-export function getStart(){
-  console.log(dummy.position);
-  return dummy.position;
-}
-
-export function getGoal(){
-  return goal.position;
 }
 
 let nodeVisualzation: Object3D[] = [];
@@ -450,23 +527,29 @@ const clock = new THREE.Clock();
 var render = function () {
     requestAnimationFrame( render );
 
-    renderer.render(scene, camera);
+    const dt = clock.getDelta();
 
-    if ( movements.length > 0 ) {
-      if(mixer){
-        mixer.update(clock.getDelta());
+    for (const agent of agents) {
+      if (agent.movements.length > 0) {
+        agent.mixer.update(dt);
+        move(agent.model, agent.movements, agent.movements[0], dt);
       }
-      move( dummy, movements[ 0 ], clock.getDelta());
-      orbitControls.target = dummy.position;
+
+      // Agent reached the goal or path failed — randomize and re-path
+      if (agent.movements.length === 0) {
+        generateGoalForAgent(agent);
+        const p = new Pathing();
+        agent.movements = p.getPath(agent.model.position, agent.goal.position);
+      }
+    }
+
+    // Camera follows the first agent
+    if (agents.length > 0) {
+      orbitControls.target = agents[0].model.position;
       orbitControls.update();
     }
 
-    // Agent reached the goal or path failed — randomize and re-path
-    if (movements.length === 0 && dummy) {
-      generateGoal();
-      const path = new Pathing();
-      movements = path.getPath();
-    }
+    renderer.render(scene, camera);
   };
 
 render();

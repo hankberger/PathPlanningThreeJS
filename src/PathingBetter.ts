@@ -1,6 +1,6 @@
 //@ts-nocheck
 import { Vector3 } from 'three';
-import {getBarrelPositions, getStart, getGoal,  visualizePath} from './main';
+import {getBarrelPositions, visualizePath} from './main';
 import { pointInCircleList,rayCircleListIntersect} from './collision';
 
 class MinHeap {
@@ -73,10 +73,10 @@ export default class Pathing {
         this.parent = [];
     }
 
-    public getPath(): Vector3[]{
+    public getPath(start: Vector3, goal: Vector3): Vector3[]{
 
-      this.start = getStart();
-      this.goal = getGoal();
+      this.start = start;
+      this.goal = goal;
       this.obstacles = getBarrelPositions();
 
       // Cache centers once — obstacles are already Vector3[], so just reference them
