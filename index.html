@@ -6,19 +6,33 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     
     <link rel="stylesheet" href="https://use.typekit.net/xcp8pap.css">
-    <script type="module" crossorigin src="/PathPlanningThreeJS/assets/index.7da07d86.js"></script>
-    <link rel="stylesheet" href="/PathPlanningThreeJS/assets/index.4394c06c.css">
+    <script type="module" crossorigin src="/PathPlanningThreeJS/assets/index.e77ba2df.js"></script>
+    <link rel="stylesheet" href="/PathPlanningThreeJS/assets/index.b6caf315.css">
   </head>
   <body>
-    
-    <div class="ui">
-      <h1>csci 5611</h1>
-      <h2>project 1: part 2</h2>
-      <h3>Objects: <span id="numobj">15</span></h3>
-      <input type="range" min="1" max="60" value="30" class="slider" id="myRange">
-      <button class="secondary" id="goalbttn">Randomize Goal</button>
-      <button class="secondary" id="objbttn" >Randomize Objects</button>
-      <button class="primary" id="startbttn">Start Pathing</button>
+
+    <div class="sheet-backdrop" id="sheetBackdrop"></div>
+    <div class="sheet" id="sheet">
+      <div class="sheet-handle" id="sheetHandle">
+        <div class="sheet-handle-bar"></div>
+        <h1 class="sheet-peek-title">Motion Planning</h1>
+        <p class="sheet-peek-hint">Click to see more</p>
+      </div>
+      <div class="sheet-content">
+        <p class="sheet-description">A sandbox for experimenting with motion planning algorithms and visualizing pathfinding in real time. Adjust the obstacles and watch the agent navigate.</p>
+        <div class="sheet-control">
+          <label class="sheet-label" for="barrelSlider">
+            Number of Barrels: <span id="barrelCount">60</span>
+          </label>
+          <input type="range" id="barrelSlider" class="sheet-slider" min="0" max="60" value="60" step="1" />
+        </div>
+        <div class="sheet-control">
+          <label class="sheet-label" for="agentSlider">
+            Number of Agents: <span id="agentCount">1</span>
+          </label>
+          <input type="range" id="agentSlider" class="sheet-slider" min="1" max="10" value="1" step="1" />
+        </div>
+      </div>
     </div>
 
     
