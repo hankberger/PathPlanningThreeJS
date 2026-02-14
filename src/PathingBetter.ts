@@ -1,10 +1,55 @@
 //@ts-nocheck
-import { Object3D, Vector3 } from 'three';
-import {getObjects, getStart, getGoal,  visualizePath} from './main';
+import { Vector3 } from 'three';
+import {getBarrelPositions, getStart, getGoal,  visualizePath} from './main';
 import { pointInCircleList,rayCircleListIntersect} from './collision';
 
+class MinHeap {
+    private heap: [number, number][] = []; // [cost, nodeId]
+
+    push(cost: number, nodeId: number) {
+        this.heap.push([cost, nodeId]);
+        this._bubbleUp(this.heap.length - 1);
+    }
+
+    pop(): [number, number] | undefined {
+        if (this.heap.length === 0) return undefined;
+        const min = this.heap[0];
+        const last = this.heap.pop()!;
+        if (this.heap.length > 0) {
+            this.heap[0] = last;
+            this._sinkDown(0);
+        }
+        return min;
+    }
+
+    get size() { return this.heap.length; }
+
+    private _bubbleUp(i: number) {
+        while (i > 0) {
+            const parent = (i - 1) >> 1;
+            if (this.heap[i][0] >= this.heap[parent][0]) break;
+            [this.heap[i], this.heap[parent]] = [this.heap[parent], this.heap[i]];
+            i = parent;
+        }
+    }
+
+    private _sinkDown(i: number) {
+        const n = this.heap.length;
+        while (true) {
+            let smallest = i;
+            const left = 2 * i + 1;
+            const right = 2 * i + 2;
+            if (left < n && this.heap[left][0] < this.heap[smallest][0]) smallest = left;
+            if (right < n && this.heap[right][0] < this.heap[smallest][0]) smallest = right;
+            if (smallest === i) break;
+            [this.heap[i], this.heap[smallest]] = [this.heap[smallest], this.heap[i]];
+            i = smallest;
+        }
+    }
+}
+
 export default class Pathing {
-    private obstacles: Object3D[];
+    private obstacles: Vector3[];
     private nodePos: Vector3[];
     private start: Vector3;
     private goal: Vector3;
@@ -21,7 +66,7 @@ export default class Pathing {
         this.start = new Vector3();
         this.goal = new Vector3();
         this.obstacles = [];
-        
+
         this.nodePos = [];
 
         this.visited = [];
@@ -29,35 +74,35 @@ export default class Pathing {
     }
 
     public getPath(): Vector3[]{
-      
+
       this.start = getStart();
       this.goal = getGoal();
-      this.obstacles = getObjects();
+      this.obstacles = getBarrelPositions();
 
-      // while(true){
-        this.generateRandomNodes(this.numberOfNodes, this.getCenters());
-        // visuzlizeNodes(this.nodePos);
+      // Cache centers once — obstacles are already Vector3[], so just reference them
+      const centers = this.obstacles;
+      const numObstacles = this.obstacles.length;
 
-        this.connectNeighbors(this.getCenters(), this.radius, this.obstacles.length, this.nodePos, this.numberOfNodes);
-        // visualizeNeighbors(this.nodePos, this.neighbors);
+        this.generateRandomNodes(this.numberOfNodes, centers, numObstacles);
 
-        const startID = this.closestNode(this.start, this.nodePos, this.numberOfNodes, this.getCenters(), this.radius, this.obstacles.length);
-        const goalID = this.closestNode(this.goal, this.nodePos, this.numberOfNodes, this.getCenters(), this.radius, this.obstacles.length);
+        this.connectNeighbors(centers, this.radius, numObstacles, this.nodePos, this.numberOfNodes);
+
+        const startID = this.closestNode(this.start, this.nodePos, this.numberOfNodes, centers, this.radius, numObstacles);
+        const goalID = this.closestNode(this.goal, this.nodePos, this.numberOfNodes, centers, this.radius, numObstacles);
         console.log("start:", startID, "goalid:", goalID)
 
-        // const nodeOrder = this.runBFS(this.nodePos, this.numberOfNodes, startID, goalID);
         const nodeOrder = this.runUCS(this.nodePos, this.numberOfNodes, startID, goalID);
 
-        
-        
+
+
         if(nodeOrder.length === 0){
           console.log("case 1");
           return [this.nodePos[startID], this.nodePos[goalID]];
         }
 
         if(nodeOrder[0] === -1){
-          console.log("case 2");
-          // continue;
+          console.log("case 2: no path found");
+          return [];
         }
 
         const retPath = [];
@@ -65,57 +110,38 @@ export default class Pathing {
         for(let i = 0; i < nodeOrder.length; i++){
           retPath.push(this.nodePos[nodeOrder[i]])
         }
-      
+
         retPath.push(this.goal);
 
         visualizePath(this.nodePos, this.neighbors, retPath);
         return retPath;
-   
+
     }
 
-    private getCenters(): Vector3[]{
-      let obsCenters = [];
-      for(let obj of this.obstacles){
-        const vec = new Vector3(obj.position.x, obj.position.y, obj.position.z)
-        obsCenters.push(vec);
-      }
-    
-      return obsCenters;
-    }
-
-    // private nodePosSafeVec(): Vector3[]{
-    //   let nodeCenters = [];
-    //   for(let node of this.nodePos){
-    //     const vec = new Vector3(node.x, node.y, node.z);
-    //     nodeCenters.push(vec);
-    //   }
-
-    //   return nodeCenters;
-    // }
-
-    private generateRandomNodes(numNodes: number, circleCenters: Vector3[]){
+    private generateRandomNodes(numNodes: number, circleCenters: Vector3[], numObstacles: number){
         for (let i = 0; i < numNodes; i++){
           let randPos = new Vector3(Math.random() * 16 - 8, 0, Math.random()* 16 - 8);
-          let insideAnyCircle = pointInCircleList(circleCenters, this.radius, this.obstacles.length,randPos,.2);
-          //boolean insideBox = pointInBox(boxTopLeft, boxW, boxH, randPos);
-          while (insideAnyCircle){
+          let insideAnyCircle = pointInCircleList(circleCenters, this.radius, numObstacles, randPos,.2);
+          let attempts = 0;
+          while (insideAnyCircle && attempts < 1000){
             randPos = new Vector3(Math.random() * 16 - 8, 0, Math.random()* 16 - 8);
-            insideAnyCircle = pointInCircleList(circleCenters, this.radius,this.obstacles.length,randPos,.2);
-            //insideBox = pointInBox(boxTopLeft, boxW, boxH, randPos);
+            insideAnyCircle = pointInCircleList(circleCenters, this.radius, numObstacles, randPos,.2);
+            attempts++;
           }
           this.nodePos[i] = randPos;
         }
     }
 
     private connectNeighbors(centers: Vector3[], radii: number, numObstacles: number, nodePos: Vector3[], numNodes: number){
+      const MAX_NEIGHBOR_DIST = 5;
       for (let i = 0; i < numNodes; i++){
-          this.neighbors[i] = [];  //Clear neighbors list
+          this.neighbors[i] = [];
           for (let j = 0; j < numNodes; j++){
-          if (i == j) continue; //don't connect to myself 
+          if (i == j) continue;
+          const distBetween = nodePos[i].distanceTo(nodePos[j]);
+          if (distBetween > MAX_NEIGHBOR_DIST) continue;
           let dir = new Vector3();
           dir.subVectors(nodePos[j], nodePos[i]).normalize();
-          // console.log("LENGTH:", dir.length());
-          const distBetween = nodePos[i].distanceTo(nodePos[j]);
           const circleListCheck = rayCircleListIntersect(centers, radii, numObstacles, nodePos[i], dir, distBetween);
           if (!circleListCheck.hit){
               this.neighbors[i].push(j);
@@ -124,17 +150,14 @@ export default class Pathing {
       }
   }
 
-  private closestNode(point: Vector3, nodePos: Vector3[], numNodes: number, 
+  private closestNode(point: Vector3, nodePos: Vector3[], numNodes: number,
     centers: Vector3[], radii: number, numObstacles: number): number {
     let closestID = -1;
     let minDist = 999999;
     for (let i = 0; i < numNodes; i++){
-  
+
       const queryNode = nodePos[i];
-  
-      // Make sure the point can see node in question
-      // if (!this.canSeeEachOther(centers, radii, numObstacles, queryNode, point)) continue;
-  
+
       const dist = queryNode.distanceTo(point);
       if (dist < minDist){
         closestID = i;
@@ -144,132 +167,49 @@ export default class Pathing {
     return closestID;
 }
 
-  // private canSeeEachOther(centers: Vector3[], radii: number, numObstacles: number, goal: Vector3, start: Vector3): boolean {
-  //   const dir = new Vector3();
-  //   dir.subVectors(goal, start).normalize();
-  //   const distBetween = goal.distanceTo(start);
-  //   const circleListCheck = rayCircleListIntersect(centers, this.radius, numObstacles, start, dir, distBetween);
-  //   return !circleListCheck.hit;
-  // }
-
-
-  // private runBFS(nodePos: Vector3[], numNodes: number, startID: number, goalID: number): number[]{
-  //   const fringe: number[] = [];  //New empty fringe
-  //   const path: number[] = [];
-  //   for (let i = 0; i < numNodes; i++) { //Clear visit tags and parent pointers
-  //     this.visited[i] = false;
-  //     this.parent[i] = -1; //No parent yet
-  //   }
-  
-  //   //println("\nBeginning Search");
-    
-  //   this.visited[startID] = true;
-  //   fringe.push(startID);
-  //   //println("Adding node", startID, "(start) to the fringe.");
-  //   //println(" Current Fringe: ", fringe);
-    
-  //   while (fringe.length > 0){
-  //     const currentNode = fringe.shift();
-      
-  //     if (currentNode == goalID){
-  //       //println("Goal found!");
-  //       break;
-  //     }
-  //     for (let i = 0; i < this.neighbors[currentNode ?? 0].length; i++){
-  //       const neighborNode = this.neighbors[currentNode ?? 0][i];
-  //       if (!this.visited[neighborNode]){
-  //         this.visited[neighborNode] = true;
-  //         this.parent[neighborNode] = currentNode ?? 0;
-  //         fringe.push(neighborNode);
-  //         //println("Added node", neighborNode, "to the fringe.");
-  //         //println(" Current Fringe: ", fringe);
-  //       }
-  //     } 
-  //   }
-    
-  //   if (fringe.length == 0){
-  //     //println("No Path");
-  //     path.unshift(-1);
-  //     return path;
-  //   }
-      
-  //   //print("\nReverse path: ");
-  //   let prevNode = this.parent[goalID];
-  //   path.unshift(goalID);
-  //   //print(goalID, " ");
-  //   while (prevNode >= 0){
-  //     //print(prevNode," ");
-  //     path.unshift(prevNode);
-  //     prevNode = this.parent[prevNode];
-  //   }
-  //   //print("\n");
-  
-  //   console.log("path", path);
-
-  //   return path;
-  // }
-
   private runUCS(nodePos: Vector3[], numNodes: number, startID: number, goalID: number): number[]{
-    const fringe = new Map();  //New empty fringe
+    const fringe = new MinHeap();
     const path: number[] = [];
-    for (let i = 0; i < numNodes; i++) { //Clear visit tags and parent pointers
+    for (let i = 0; i < numNodes; i++) {
       this.visited[i] = false;
-      this.parent[i] = -1; //No parent yet
+      this.parent[i] = -1;
     }
-  
-    //println("\nBeginning Search");
-    
-    this.visited[startID] = true;
-    fringe.set(startID, 0);
-    
-    while (fringe.size > 0){
-      let min = 999999;
-      let minNode: number = -1;
-      fringe.forEach((cost, key) =>{
-        if(cost < min){
-          minNode = key;
-          min = cost;
-        }
-      });
 
-      fringe.delete(minNode);
-      
+    this.visited[startID] = true;
+    fringe.push(0, startID);
+
+    let goalFound = false;
+    while (fringe.size > 0){
+      const [currentCost, minNode] = fringe.pop()!;
+
       if (minNode == goalID){
-        //println("Goal found!");
+        goalFound = true;
         break;
       }
 
-      for (let i = 0; i < this.neighbors[minNode ?? 0].length; i++){
-        const neighborNode = this.neighbors[minNode ?? 0][i];
+      for (let i = 0; i < this.neighbors[minNode].length; i++){
+        const neighborNode = this.neighbors[minNode][i];
         if (!this.visited[neighborNode]){
           this.visited[neighborNode] = true;
-          this.parent[neighborNode] = minNode ?? 0;
-          const cost = new Vector3();
-          cost.subVectors(nodePos[neighborNode], nodePos[minNode]);
-          fringe.set(neighborNode, min+(cost).length());
-          //println("Added node", neighborNode, "to the fringe.");
-          //println(" Current Fringe: ", fringe);
+          this.parent[neighborNode] = minNode;
+          const edgeCost = nodePos[neighborNode].distanceTo(nodePos[minNode]);
+          fringe.push(currentCost + edgeCost, neighborNode);
         }
-      } 
+      }
     }
-    
-    if (fringe.size == 0){
-      //println("No Path");
+
+    if (!goalFound){
       path.unshift(-1);
       return path;
     }
-      
-    //print("\nReverse path: ");
+
     let prevNode = this.parent[goalID];
     path.unshift(goalID);
-    //print(goalID, " ");
     while (prevNode >= 0){
-      //print(prevNode," ");
       path.unshift(prevNode);
       prevNode = this.parent[prevNode];
     }
-    //print("\n");
-  
+
     console.log("path", path);
 
     return path;

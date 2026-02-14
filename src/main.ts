@@ -7,64 +7,97 @@ import {FBXLoader} from 'three/examples/jsm/loaders/FBXLoader';
 import Pathing from './PathingBetter';
 import { pointInCircleList } from './collision';
 
-//UI
-const uiObj = document.getElementById("numobj");
+// ── Bottom Sheet ──
+const sheet = document.getElementById('sheet')!;
+const sheetHandle = document.getElementById('sheetHandle')!;
+const backdrop = document.getElementById('sheetBackdrop')!;
 
-const slider = document.getElementById('myRange');
+let sheetOpen = false;
+let dragging = false;
+let dragStartY = 0;
+let sheetStartOffset = 0;
+const sheetHeight = () => sheet.offsetHeight;
 
-if(uiObj){
-  uiObj.innerHTML = slider.value;
+function openSheet() {
+  sheetOpen = true;
+  sheet.classList.add('open');
+  backdrop.classList.add('visible');
 }
-slider?.addEventListener('input', (event)=>{
-  if(uiObj){
-    uiObj.innerHTML = slider.value;
+
+function closeSheet() {
+  sheetOpen = false;
+  sheet.classList.remove('open');
+  sheet.style.transform = '';
+  backdrop.classList.remove('visible');
+}
+
+function onDragStart(clientY: number) {
+  dragging = true;
+  dragStartY = clientY;
+  const current = new DOMMatrix(getComputedStyle(sheet).transform);
+  sheetStartOffset = current.m42; // current translateY
+  sheet.classList.add('dragging');
+}
+
+function onDragMove(clientY: number) {
+  if (!dragging) return;
+  const dy = clientY - dragStartY;
+  const minTranslate = 0;
+  const maxTranslate = sheetHeight() - 90;
+  const newY = Math.max(minTranslate, Math.min(maxTranslate, sheetStartOffset + dy));
+  sheet.style.transform = `translateY(${newY}px)`;
+  backdrop.style.opacity = String(1 - newY / maxTranslate);
+}
+
+function onDragEnd(clientY: number) {
+  if (!dragging) return;
+  dragging = false;
+  sheet.classList.remove('dragging');
+  sheet.style.transform = '';
+  backdrop.style.opacity = '';
+
+  const dy = clientY - dragStartY;
+  // If dragged down more than 30% of sheet or fast flick down → close, else open
+  if (sheetOpen && dy > sheetHeight() * 0.3) {
+    closeSheet();
+  } else if (!sheetOpen && dy < -40) {
+    openSheet();
+  } else if (sheetOpen) {
+    openSheet();
+  } else {
+    closeSheet();
   }
+}
 
-  while(slider.value > objects.length){
-    const posx = Math.random()*16 - 8;
-    const posz = Math.random()*16 - 8;
-    var newBarrel = barrel.clone();
-    newBarrel.position.x = posx;
-    newBarrel.position.z = posz;
-    newBarrel.position.y = .5;
-    newBarrel.castShadow = true;
-    newBarrel.receiveShadow = true;
-
-    objects.push(newBarrel);
-    scene.add(newBarrel)
-  }
-
-  while(slider.value < objects.length){
-    let cyl = objects.pop();
-    scene.remove(cyl);
-  }
-
-  scene.remove(goal)
-  generateGoal();
-})
-
-document.getElementById("goalbttn")?.addEventListener('click', (event)=>{
-  const freeSpace = setFreeLocation(0, getCenters());
-  goal.position.set(freeSpace.x, 0, freeSpace.z);
-  return;
+// Touch events
+sheetHandle.addEventListener('touchstart', (e) => {
+  onDragStart(e.touches[0].clientY);
+}, { passive: true });
+document.addEventListener('touchmove', (e) => {
+  if (dragging) onDragMove(e.touches[0].clientY);
+}, { passive: true });
+document.addEventListener('touchend', (e) => {
+  if (dragging) onDragEnd(e.changedTouches[0].clientY);
 });
 
-document.getElementById("objbttn")?.addEventListener('click', (event)=>{
-  for(let obj of objects){
-    const posx = Math.random()*16 - 8;
-    const posz = Math.random()*16 - 8;
-    obj.position.x = posx;
-    obj.position.z = posz;
-    obj.position.y = .5;
-  }
-  return;
+// Mouse events (for desktop testing)
+sheetHandle.addEventListener('mousedown', (e) => {
+  onDragStart(e.clientY);
+});
+document.addEventListener('mousemove', (e) => {
+  if (dragging) onDragMove(e.clientY);
+});
+document.addEventListener('mouseup', (e) => {
+  if (dragging) onDragEnd(e.clientY);
 });
 
-document.getElementById("startbttn")?.addEventListener('click', (event)=>{
-  const path = new Pathing();
-  movements = path.getPath();
-  return;
-})
+// Tap handle to toggle
+sheetHandle.addEventListener('click', () => {
+  if (!dragging) sheetOpen ? closeSheet() : openSheet();
+});
+
+// Tap backdrop to close
+backdrop.addEventListener('click', closeSheet);
 
 let path = new Pathing();
 
@@ -96,19 +129,34 @@ orbitControls.update();
 
 //MOVEMENT
 let movements: Vector3[] = [];
-let objects: THREE.Object3D[] = [];
+let barrelPositions: Vector3[] = [];
+let barrelMesh: THREE.InstancedMesh | null = null;
 let dummy: THREE.Object3D;
 let rotationSet = false;
 const speed = .04;
 
+// Reusable objects for InstancedMesh matrix updates
+const _tempMatrix = new THREE.Matrix4();
+const _tempPosition = new THREE.Vector3();
+const _tempQuaternion = new THREE.Quaternion();
+const _tempScale = new THREE.Vector3(1, 1, 1);
+
+function updateBarrelInstance(index: number, x: number, y: number, z: number, rotationY: number = 0) {
+  if(!barrelMesh) return;
+  _tempPosition.set(x, y, z);
+  _tempQuaternion.setFromAxisAngle(new Vector3(0, 1, 0), rotationY);
+  _tempMatrix.compose(_tempPosition, _tempQuaternion, _tempScale);
+  barrelMesh.setMatrixAt(index, _tempMatrix);
+}
+
 //OBSTACLES
-const numObstacles = slider.value;
+const numObstacles = 60;
 const goalGeo = new THREE.CylinderGeometry( 5, 5, 20, 32 );
 const goalMat = new THREE.MeshBasicMaterial( {color: 0x00ff00} );
 const goal = new THREE.Mesh( goalGeo, goalMat );
 
 function generateGoal(){
-  const freeSpace = setFreeLocation(0, getCenters());
+  const freeSpace = setFreeLocation(0, barrelPositions);
   goal.position.set(freeSpace.x, 0, freeSpace.z);
   goal.scale.set(.1, .01, .1);
   goal.material.transparent = true;
@@ -120,25 +168,15 @@ function generateGoal(){
 
 function setFreeLocation(numNodes: number, circleCenters: Vector3[]): Vector3{
     let randPos = new Vector3(Math.random() * 16 - 8, 0, Math.random()* 16 - 8);
-    let insideAnyCircle = pointInCircleList(circleCenters, .5, objects.length, randPos,.5);
-    //boolean insideBox = pointInBox(boxTopLeft, boxW, boxH, randPos);
-    while (insideAnyCircle){
+    let insideAnyCircle = pointInCircleList(circleCenters, .5, circleCenters.length, randPos,.5);
+    let attempts = 0;
+    while (insideAnyCircle && attempts < 1000){
       randPos = new Vector3(Math.random() * 16 - 8, 0, Math.random()* 16 - 8);
-      insideAnyCircle = pointInCircleList(circleCenters, .5, objects.length, randPos,.5);
-      //insideBox = pointInBox(boxTopLeft, boxW, boxH, randPos);
+      insideAnyCircle = pointInCircleList(circleCenters, .5, circleCenters.length, randPos,.5);
+      attempts++;
     }
 
     return randPos;
-}
-
-function getCenters(): Vector3[]{
-  let obsCenters = [];
-  for(let obj of objects){
-    const vec = new Vector3(obj.position.x, obj.position.y, obj.position.z)
-    obsCenters.push(vec);
-  }
-
-  return obsCenters;
 }
 
 const axesHelper = new THREE.AxesHelper( 5 );
@@ -148,53 +186,46 @@ scene.add( axesHelper );
 
 
 function move(agent: Object3D, destination: Vector3, dt: number){
-  if(!destination){
-    alert("No Path Found! Randomize Goal / Objects and Try again.");
-    movements = [];
+    if(!destination){
+      console.log("No path found, will retry.");
+      movements = [];
+      return;
+    }
+
+    let curPos = new Vector2(agent.position.x, agent.position.z);
+    let goalPos = new Vector2(destination.x, destination.z)
+
+    let dir = new Vector2();
+    dir.subVectors(goalPos, curPos);
+
+    let goalRotation = Math.atan2(dir.x, dir.y);
+
+
+
+    if(Math.abs((agent.rotation.y) - goalRotation) < .15){
+      //Do nothing
+    } else if(agent.rotation.y < (agent.rotation.y + goalRotation) / 2){
+      agent.rotation.y += .1;
+    } else {
+      agent.rotation.y -= .1;
+    }
+
+    if(dir.length() < .25){
+      movements.shift();
+      rotationSet = false;
+      return;
+    }
+
+    if(!((speed*dt) > dir.length())){
+      dir.normalize();
+    } else {
+      agent.position.x = destination.x;
+      agent.position.z = destination.z;
+    }
+
+    const vel = dir.multiplyScalar(speed);
+    agent.position.add(new Vector3(vel.x, 0, vel.y));
     return;
-  }
-
-  let curPos = new Vector2(agent.position.x, agent.position.z);
-  let goalPos = new Vector2(destination.x, destination.z)
-
-  let dir = new Vector2();
-  dir.subVectors(goalPos, curPos);
-
-  let goalRotation = Math.atan2(dir.x, dir.y);
-
-
-
-  if(Math.abs((agent.rotation.y) - goalRotation) < .15){
-    //Do nothing
-  } else if(agent.rotation.y < (agent.rotation.y + goalRotation) / 2){
-    agent.rotation.y += .1;
-  } else {
-    agent.rotation.y -= .1;
-  }
-  // agent.rotation.y = (agent.rotation.y + goalRotation) / 2;
-
-  // if(!rotationSet){
-  //   // agent.lookAt(destination.x, 0, destination.z);
-  //   agent.rotation.y = goalRotation;
-  //   rotationSet = true;
-  // }
-
-  if(dir.length() < .25){
-    movements.shift();
-    rotationSet = false;
-    return;
-  }
-
-  if(!((speed*dt) > dir.length())){
-    dir.normalize();
-  } else {
-    agent.position.x = destination.x;
-    agent.position.z = destination.z;
-  }
-
-  const vel = dir.multiplyScalar(speed);
-  agent.position.add(new Vector3(vel.x, 0, vel.y));
-  return;
 }
 
 let mixer: AnimationMixer;
@@ -209,14 +240,12 @@ new GLTFLoader().load('scalefix.gltf', function (gltf) {
     const dummyposz = Math.random()*16 - 8;
     model.position.x = dummyposx;
     model.position.z = dummyposz;
-    // orbitControls.target = model.position;
-    
 
     dummy = model;
 
     orbitControls.target = dummy.position;
     orbitControls.update();
-    
+
     const gltfAnimations: THREE.AnimationClip[] = gltf.animations;
     mixer = new THREE.AnimationMixer(model);
     const animationsMap: Map<string, THREE.AnimationAction> = new Map();
@@ -228,17 +257,40 @@ new GLTFLoader().load('scalefix.gltf', function (gltf) {
     console.log(anim);
     anim?.play();
     scene.add(model);
+
+    // Start moving immediately
+    const path = new Pathing();
+    movements = path.getPath();
 });
 
-let barrel: Object3D;
+// Load barrel FBX and create InstancedMesh
+const MAX_BARRELS = 60;
+
 new FBXLoader().load('darkblue.fbx', function(fbx){
   fbx.scale.setScalar(0.004);
-  fbx.position.y = .6;
-  fbx.traverse((child)=>{
-    child.castShadow = true;
-  })
-  
-  barrel = fbx;
+  fbx.position.set(0, 0, 0);
+  fbx.updateMatrixWorld(true);
+
+  let sourceGeometry: THREE.BufferGeometry | null = null;
+  let sourceMaterial: THREE.Material | null = null;
+
+  fbx.traverse((child) => {
+    if (child.isMesh && !sourceGeometry) {
+      sourceGeometry = child.geometry.clone();
+      sourceMaterial = child.material;
+      // Bake the child's world matrix (includes parent scale) into the geometry
+      sourceGeometry.applyMatrix4(child.matrixWorld);
+    }
+  });
+
+  if (!sourceGeometry || !sourceMaterial) return;
+
+  barrelMesh = new THREE.InstancedMesh(sourceGeometry, sourceMaterial, MAX_BARRELS);
+  barrelMesh.count = 0;
+  barrelMesh.castShadow = true;
+  barrelMesh.receiveShadow = true;
+  scene.add(barrelMesh);
+
   createObstacles();
 });
 
@@ -258,14 +310,13 @@ function generateFloor() {
     const WIDTH = 80
     const LENGTH = 80
 
-    const geometry = new THREE.PlaneGeometry(WIDTH, LENGTH, 512, 512);
+    const geometry = new THREE.PlaneGeometry(WIDTH, LENGTH, 1, 1);
     const material = new THREE.MeshStandardMaterial(
         {
            map: floorColor
         })
-        
+
         wrapAndRepeatTexture(material.map);
-    // const material = new THREE.MeshPhongMaterial({ map: placeholder})
 
     const floor = new THREE.Mesh(geometry, material)
     floor.receiveShadow = true
@@ -292,37 +343,26 @@ function light() {
     dirLight.shadow.camera.right = 50;
     dirLight.shadow.camera.near = 0.1;
     dirLight.shadow.camera.far = 200;
-    dirLight.shadow.mapSize.width = 4096;
-    dirLight.shadow.mapSize.height = 4096;
+    dirLight.shadow.mapSize.width = 2048;
+    dirLight.shadow.mapSize.height = 2048;
     scene.add(dirLight);
-    // scene.add( new THREE.CameraHelper(dirLight.shadow.camera))
 }
 
 light();
-
-// const geometry = new THREE.CylinderGeometry(.4, .4, 1.2, 16);
-// const material = new THREE.MeshPhongMaterial( {color: 0xffffff} );
-// const AAA = new THREE.Mesh(geometry, material);
-// AAA.position.y = .6;
-// scene.add(AAA);
 
 function createObstacles(){
   for(let i = 0; i < numObstacles; i++){
     const posx = Math.random()*16 - 8;
     const posz = Math.random()*16 - 8;
     const rotation = Math.random() * 360;
-    console.log(barrel)
-    var newBarrel = barrel.clone();
-    newBarrel.position.x = posx;
-    newBarrel.position.z = posz;
-    newBarrel.position.y = .5;
-    newBarrel.rotation.y = rotation;
+    const index = barrelPositions.length;
+    barrelPositions.push(new Vector3(posx, 0.5, posz));
+    updateBarrelInstance(index, posx, 0.5, posz, rotation);
+  }
 
-    newBarrel.castShadow = true;
-    newBarrel.receiveShadow = true;
-
-    objects.push(newBarrel);
-    scene.add(newBarrel)
+  if(barrelMesh){
+    barrelMesh.count = barrelPositions.length;
+    barrelMesh.instanceMatrix.needsUpdate = true;
   }
 
   generateGoal();
@@ -330,48 +370,9 @@ function createObstacles(){
 
 
 
-// document.addEventListener( 'mousedown', onDocumentMouseDown );
-// function onDocumentMouseDown( event: any ) {   
-  
-//   event.preventDefault();
-//   // if(event.which === 1){
-//   //   var mouse3D = new THREE.Vector3( ( event.clientX/ window.innerWidth ) * 2 - 1,   
-//   //                         -( event.clientY / window.innerHeight ) * 2 + 1,  
-//   //                           0.5 );     
-//   //   var raycaster =  new THREE.Raycaster();                                        
-//   //   raycaster.setFromCamera( mouse3D, camera );
-//   //   var intersects = raycaster.intersectObjects(scene.children);
-
-    
-//   //   if ( intersects.length > 0 ) {
-//   //     if(!(intersects[0].object.geometry.type == 'PlaneGeometry')){
-//   //       obj = intersects[0].object;
-//   //       console.log(obj)
-//   //       if(obj.hasOwnProperty('material') && obj.material.hasOwnProperty('emissive')){
-//   //         obj.material.emissive.set(0xaaaaaa);
-//   //         // controls.attach(obj);
-//   //         // scene.add(controls);
-//   //       }
-        
-//   //     }
-//   //   }
-//   let mouse3D = new THREE.Vector3( ( event.clientX/ window.innerWidth ) * 2 - 1,   
-//                         -( event.clientY / window.innerHeight ) * 2 + 1,  
-//                           0.5 );     
-
-//   var raycaster =  new THREE.Raycaster();                                        
-//   raycaster.setFromCamera( mouse3D, camera );
-
-//   // Grab all objects that can be intersected.
-//   var intersects = raycaster.intersectObjects( scene.children );
-//   if ( intersects.length > 0 ) {
-//     movements.push(intersects[ 0 ].point);
-//   }
-// }
-
 //Pathing Helper functions
-export function getObjects(){
-  return objects;
+export function getBarrelPositions(): Vector3[]{
+  return barrelPositions;
 }
 
 export function getStart(){
@@ -391,18 +392,15 @@ export function visuzlizeNodes(nodes: Vector3[]){
   nodeVisualzation = [];
   const geometry = new THREE.CylinderGeometry(.1, .1, .2, 8);
   const material = new THREE.MeshPhongMaterial( {color: 0xffffff} );
-  
-  
+
+
   for(let node of nodes){
     const AAA = new THREE.Mesh(geometry, material);
     AAA.position.x = node.x;
     AAA.position.y = .05;
     AAA.position.z = node.z;
-    // dotGeometry.vertices.push(new THREE.Vector3( 0, 0, 0));
-    
-    nodeVisualzation.push(AAA);  
-    // dot.position.add(node);
-    // dot.position.y = .1;
+
+    nodeVisualzation.push(AAA);
     scene.add( AAA );
   }
 
@@ -430,16 +428,6 @@ export function visualizePath(nodes: Vector3[], neighbors: number[][], path: Vec
   const material = new THREE.LineBasicMaterial({
     color: 0x0000ff
   });
-  // for(let i = 0; i < nodes.length; i++){
-  //   for(let j = 0; j < neighbors[i].length; j++){
-  //     const points = [];
-  //     points.push(nodes[i]);
-  //     points.push(nodes[neighbors[i][j]]);
-  //     const geometry = new THREE.BufferGeometry().setFromPoints( points );
-  //     const line = new THREE.Line( geometry, material );
-  //     scene.add(line);
-  //   }
-  // }
   visuzlizeNodes(path);
 
   for(let i = 0; i < path.length - 1; i++){
@@ -450,20 +438,20 @@ export function visualizePath(nodes: Vector3[], neighbors: number[][], path: Vec
     if(points.length === 0) return;
     const geometry = new THREE.BufferGeometry().setFromPoints( points );
     const line = new THREE.Line( geometry, material );
-    
+
     scene.add(line);
     nodeVisualzation.push(line);
   }
 
-  
+
 }
 
 const clock = new THREE.Clock();
 var render = function () {
     requestAnimationFrame( render );
-  
+
     renderer.render(scene, camera);
-    
+
     if ( movements.length > 0 ) {
       if(mixer){
         mixer.update(clock.getDelta());
@@ -472,6 +460,13 @@ var render = function () {
       orbitControls.target = dummy.position;
       orbitControls.update();
     }
+
+    // Agent reached the goal or path failed — randomize and re-path
+    if (movements.length === 0 && dummy) {
+      generateGoal();
+      const path = new Pathing();
+      movements = path.getPath();
+    }
   };
-  
+
 render();

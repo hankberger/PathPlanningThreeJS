@@ -1,106 +1,132 @@
-body, html{
+body, html {
   margin: 0;
   padding: 0;
+  overflow: hidden;
+  touch-action: none;
 }
 
-.ui{
-  position: absolute;
-  right: 5px;
-  top: 5px;
+/* ── Bottom Sheet ── */
+
+.sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+  z-index: 90;
+}
+
+.sheet-backdrop.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 100;
+  /* peek height: handle + title + hint */
+  transform: translateY(calc(100% - 90px));
+  border-radius: 16px 16px 0 0;
+  background: rgba(18, 18, 18, 0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+  will-change: transform;
+  transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+  max-width: 480px;
+  margin: 0 auto;
+}
+
+.sheet.dragging {
+  transition: none;
+}
+
+.sheet.open {
+  transform: translateY(0);
+}
+
+/* Handle / grab area */
+.sheet-handle {
   display: flex;
   flex-direction: column;
-  height: 225px;
-  width: 200px;
-  border-radius: 10px;
-  background-color: rgba(0, 0, 0, .50);
-  border: solid black 1px;
+  justify-content: center;
+  align-items: center;
+  padding: 12px 0 4px;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
-.ui h1{
-  margin: 0;
-  margin-top: 5px;
-  color: white;
-  width: 100%;
-  text-align: center;
-  font-family: komet-sc,sans-serif;
+.sheet-handle-bar {
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.35);
+}
+
+/* Peek elements (visible when collapsed) */
+.sheet-peek-title {
+  margin: 6px 0 0;
+  color: #fff;
+  font-family: komet-sc, sans-serif;
   font-weight: 900;
   font-style: normal;
-  font-size: 30pt;
-}
-
-.ui h2{
-  margin: 0;
-  color: white;
-  width: 100%;
+  font-size: 16pt;
   text-align: center;
-  font-family: komet-sc,sans-serif;
-  font-weight: 300;
-  font-style: italic;
-  font-size: 14pt;
-  margin-top: -10px;
+  transition: opacity 0.25s ease;
 }
 
-.ui h3{
+.sheet-peek-hint {
+  margin: 2px 0 0;
+  color: rgba(255, 255, 255, 0.45);
   font-family: komet-sc, sans-serif;
-  font-weight: 700;
-  font-style: normal;
-  color: white;
-  margin: 10px;
-  position: absolute;
-  bottom: 110px;
+  font-weight: 400;
+  font-size: 9pt;
+  text-align: center;
+  letter-spacing: 0.5px;
+  transition: opacity 0.25s ease;
 }
 
-.slider {
-  position: absolute;
-  bottom: 90px;
-  width: 90%;
-  margin: 10px;
+.sheet.open .sheet-peek-hint {
+  opacity: 0;
+  pointer-events: none;
 }
 
-button{
-  width: auto;
-  margin: 10px;
-  border: none;
-  height: 35px;
-  border-radius: 5px;
-  font-family: komet-sc,sans-serif;
+/* Content area — hidden when collapsed */
+.sheet-content {
+  padding: 8px 20px 32px;
+  padding-bottom: max(32px, env(safe-area-inset-bottom));
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.25s ease, visibility 0.25s ease;
+}
+
+.sheet.open .sheet-content {
+  opacity: 1;
+  visibility: visible;
+}
+
+.sheet-title {
+  margin: 0;
+  color: #fff;
+  font-family: komet-sc, sans-serif;
   font-weight: 900;
   font-style: normal;
-  font-size: 12pt;
-  box-shadow: rgba(0, 0, 0, 0.24) 0px 3px 8px;
-  position: absolute;
- 
-  width: 90%;
-  cursor: pointer;
+  font-size: 22pt;
+  text-align: center;
 }
 
-.primary{
-  background-color: #FFBF00;
-  color: white;
-  /* border: solid white 2px; */
-  text-decoration: underline;
-  bottom: 0px;
+/* ── Desktop: constrain width, keep same behaviour ── */
+@media (min-width: 481px) {
+  .sheet {
+    max-width: 380px;
+    left: auto;
+    right: 16px;
+    border-radius: 16px 16px 0 0;
+  }
 }
-
-.secondary{
-  background-color: white;
-  color: #333333;
-  border: solid white 1px;
-  bottom: 45px;
-  font-family: komet-sc, sans-serif;
-  font-weight: 700;
-  font-style: normal;
-  font-size: 10pt;
-}
-
-#objbttn{
-  width: 42.5%;
-  margin-right: 5px;
-}
-
-#goalbttn{
-  width: 42.5%;
-  left: 100px;
-  margin-left: 5px;
-}
-

@@ -8,15 +8,17 @@
     <link rel="stylesheet" href="https://use.typekit.net/xcp8pap.css">
   </head>
   <body>
-    
-    <div class="ui">
-      <h1>csci 5611</h1>
-      <h2>project 1: part 2</h2>
-      <h3>Objects: <span id="numobj">15</span></h3>
-      <input type="range" min="1" max="60" value="30" class="slider" id="myRange">
-      <button class="secondary" id="goalbttn">Randomize Goal</button>
-      <button class="secondary" id="objbttn" >Randomize Objects</button>
-      <button class="primary" id="startbttn">Start Pathing</button>
+
+    <div class="sheet-backdrop" id="sheetBackdrop"></div>
+    <div class="sheet" id="sheet">
+      <div class="sheet-handle" id="sheetHandle">
+        <div class="sheet-handle-bar"></div>
+        <h1 class="sheet-peek-title">Motion Planning</h1>
+        <p class="sheet-peek-hint">Click to see more</p>
+      </div>
+      <div class="sheet-content">
+        <h1 class="sheet-title">Motion Planning</h1>
+      </div>
     </div>
 
     <script type="module" src="/src/main.ts"></script>
